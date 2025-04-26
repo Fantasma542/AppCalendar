@@ -5,10 +5,10 @@ class ThemeToggleButton extends StatelessWidget {
   final VoidCallback toggleTheme;
 
   const ThemeToggleButton({
-    Key? key,
+    super.key,
     required this.isDarkMode,
     required this.toggleTheme,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {

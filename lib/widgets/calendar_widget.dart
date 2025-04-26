@@ -10,13 +10,13 @@ class CalendarWidget extends StatelessWidget {
   final Function(DateTime) onAddEvent;
 
   const CalendarWidget({
-    Key? key,
+    super.key,
     required this.selectedDay,
     required this.focusedDay,
     required this.events,
     required this.onDaySelected,
     required this.onAddEvent,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {

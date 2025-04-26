@@ -2,7 +2,9 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:table_calendar/table_calendar.dart';
-import 'package:calenapp/models/event.dart'; // Asegúrate de importar la clase Event
+import 'package:calenapp/models/event.dart';
+import 'package:calenapp/services/notifications_service.dart';
+import 'package:calenapp/utils/shared_prefs.dart'; // Para SharedPrefs // Asegúrate de importar la clase Event
 
 class CalendarPage extends StatefulWidget {
   final VoidCallback toggleTheme;
@@ -23,6 +25,10 @@ class _CalendarPageState extends State<CalendarPage> {
   late DateTime _focusedDay;
   final Map<DateTime, List<Event>> _events = {};
   DateTime? _lastTappedDay;
+
+  List<Event> _getEventsForDay(DateTime day) {
+    return _events[DateTime.utc(day.year, day.month, day.day)] ?? [];
+  }
 
   @override
   void initState() {
@@ -72,6 +78,12 @@ class _CalendarPageState extends State<CalendarPage> {
     );
     setState(() => _events[key]?.remove(event));
     await _saveEvents();
+
+    // Cancelar notificación si existe
+    final notificationsEnabled = await SharedPrefs.getNotificationsEnabled();
+    if (notificationsEnabled) {
+      await NotificationService().cancelNotification(key.hashCode);
+    }
   }
 
   Future<void> _addEventDialog(DateTime day) async {
@@ -81,69 +93,69 @@ class _CalendarPageState extends State<CalendarPage> {
 
     await showDialog(
       context: context,
-      builder:
-          (context) => AlertDialog(
-            title: Text("Añadir evento"),
-            content: SingleChildScrollView(
-              child: Column(
-                children: [
-                  TextField(
-                    controller: titleController,
-                    decoration: InputDecoration(labelText: 'Título'),
-                  ),
-                  TextField(
-                    controller: descriptionController,
-                    decoration: InputDecoration(labelText: 'Descripción'),
-                  ),
-                  SizedBox(height: 12),
-                  Row(
-                    children: [
-                      Text('Hora: ${selectedTime.format(context)}'),
-                      Spacer(),
-                      TextButton(
-                        onPressed: () async {
-                          final picked = await showTimePicker(
-                            context: context,
-                            initialTime: selectedTime,
-                          );
-                          if (picked != null) {
-                            setState(() => selectedTime = picked);
-                          }
-                        },
-                        child: Text('Seleccionar hora'),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-            actions: [
-              TextButton(
-                child: Text('Cancelar'),
-                onPressed: () => Navigator.pop(context),
-              ),
-              ElevatedButton(
-                child: Text('Añadir'),
-                onPressed: () async {
-                  if (titleController.text.isEmpty) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('El título es obligatorio')),
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setStateDialog) {
+            return AlertDialog(
+              // ... (contenido existente del AlertDialog)
+              actions: [
+                TextButton(
+                  child: Text('Cancelar'),
+                  onPressed: () => Navigator.pop(context),
+                ),
+                ElevatedButton(
+                  child: Text('Añadir'),
+                  onPressed: () async {
+                    if (titleController.text.isEmpty) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('El título es obligatorio')),
+                      );
+                      return;
+                    }
+
+                    final event = Event(
+                      title: titleController.text,
+                      description: descriptionController.text,
+                      time: selectedTime,
                     );
-                    return;
-                  }
-                  final event = Event(
-                    title: titleController.text,
-                    description: descriptionController.text,
-                    time: selectedTime,
-                  );
-                  final key = DateTime.utc(day.year, day.month, day.day);
-                  setState(() => _events[key] = [..._events[key] ?? [], event]);
-                  await _saveEvents();
-                  Navigator.pop(context);
-                },
-              ),
-            ],
-          ),
+
+                    final key = DateTime.utc(day.year, day.month, day.day);
+                    setState(() {
+                      _events[key] = [..._events[key] ?? [], event];
+                      _focusedDay = _selectedDay;
+                    });
+                    await _saveEvents();
+
+                    // Notificación silenciosa de confirmación
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('✅ Evento guardado')),
+                    );
+
+                    // Verificar preferencias antes de programar notificación
+                    final notificationsEnabled =
+                        await SharedPrefs.getNotificationsEnabled();
+                    if (notificationsEnabled) {
+                      await NotificationService().scheduleEventNotification(
+                        'Evento Programado', // Título de la notificación
+                        'Recuerda tu evento importante', // Cuerpo de la notificación
+                        DateTime(
+                          2025,
+                          5,
+                          1,
+                          10,
+                          0,
+                        ), // Fecha y hora programada para la notificación
+                      );
+                    }
+
+                    Navigator.pop(context);
+                  },
+                ),
+              ],
+            );
+          },
+        );
+      },
     );
   }
 
@@ -153,115 +165,157 @@ class _CalendarPageState extends State<CalendarPage> {
     final currentMonthColor = widget.isDarkMode ? Colors.white : Colors.black;
     final otherMonthColor = widget.isDarkMode ? Colors.white54 : Colors.black54;
 
-    return Scaffold(
-      appBar: AppBar(
-        title: Text("Calendario"),
-        actions: [
-          IconButton(
-            icon: Icon(
-              widget.isDarkMode ? Icons.wb_sunny : Icons.nightlight_round,
-            ),
-            onPressed: widget.toggleTheme,
-          ),
-        ],
-      ),
-      body: Column(
-        children: [
-          TableCalendar<Event>(
-            firstDay: DateTime(2020),
-            lastDay: DateTime(2030),
-            focusedDay: _focusedDay,
-            selectedDayPredicate: (day) => isSameDay(_selectedDay, day),
-            eventLoader:
-                (day) =>
-                    _events[DateTime.utc(day.year, day.month, day.day)] ?? [],
-            onDaySelected: (selectedDay, focusedDay) {
-              final normalizedDay = DateTime.utc(
-                selectedDay.year,
-                selectedDay.month,
-                selectedDay.day,
-              );
-              final isDifferentMonth = !isSameMonth(_focusedDay, selectedDay);
+    return FutureBuilder<bool>(
+      // Obtenemos el estado de las notificaciones
+      future: SharedPrefs.getNotificationsEnabled(),
+      builder: (context, snapshot) {
+        final notificationsEnabled = snapshot.data ?? true;
 
-              setState(() {
-                if (isDifferentMonth) {
-                  _focusedDay = selectedDay;
-                }
+        return Scaffold(
+          appBar: AppBar(
+            title: Text("Calendario"),
+            actions: [
+              // Botón de notificaciones (con color dinámico)
+              IconButton(
+                icon: Icon(Icons.notifications),
+                color: notificationsEnabled ? Colors.blue : Colors.grey,
+                onPressed: () async {
+                  final newStatus = !notificationsEnabled;
+                  await SharedPrefs.setNotificationsEnabled(newStatus);
+                  setState(() {}); // Actualiza la UI
 
-                // Si es el mismo día seleccionado previamente, abre diálogo
-                if (isSameDay(_selectedDay, normalizedDay)) {
-                  _addEventDialog(normalizedDay);
-                } else {
-                  // Si es un día diferente, solo selecciona
-                  _selectedDay = normalizedDay;
-                }
-              });
-            },
-            calendarStyle: CalendarStyle(
-              defaultTextStyle: TextStyle(color: currentMonthColor),
-              weekendTextStyle: TextStyle(color: currentMonthColor),
-              outsideTextStyle: TextStyle(color: otherMonthColor),
-              selectedDecoration: BoxDecoration(
-                color: Colors.blue,
-                shape: BoxShape.circle,
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(
+                        newStatus
+                            ? 'Notificaciones activadas'
+                            : 'Notificaciones desactivadas',
+                      ),
+                    ),
+                  );
+                },
               ),
-              todayDecoration: BoxDecoration(
-                color: Colors.orange,
-                shape: BoxShape.circle,
+              // Botón de tema oscuro (existente)
+              IconButton(
+                icon: Icon(
+                  widget.isDarkMode ? Icons.wb_sunny : Icons.nightlight_round,
+                ),
+                onPressed: widget.toggleTheme,
               ),
-            ),
-            headerStyle: HeaderStyle(
-              formatButtonVisible: false,
-              titleCentered: true,
-              titleTextStyle: TextStyle(color: textColor),
-              leftChevronIcon: Icon(Icons.chevron_left, color: textColor),
-              rightChevronIcon: Icon(Icons.chevron_right, color: textColor),
-            ),
-            daysOfWeekStyle: DaysOfWeekStyle(
-              weekdayStyle: TextStyle(color: textColor),
-              weekendStyle: TextStyle(color: textColor),
-            ),
+            ],
           ),
-          Expanded(
-            child: ListView.builder(
-              itemCount:
-                  _events[DateTime.utc(
-                        _selectedDay.year,
-                        _selectedDay.month,
-                        _selectedDay.day,
-                      )]
-                      ?.length ??
-                  0,
-              itemBuilder: (context, index) {
-                final event =
-                    _events[DateTime.utc(
-                      _selectedDay.year,
-                      _selectedDay.month,
-                      _selectedDay.day,
-                    )]![index];
-                return ListTile(
-                  title: Text(event.title),
-                  subtitle: Text(
-                    '${event.description} • ${event.time.format(context)}',
+          body: Column(
+            children: [
+              TableCalendar<Event>(
+                firstDay: DateTime.utc(2020, 1, 1),
+                lastDay: DateTime.utc(2030, 12, 31),
+                focusedDay: _focusedDay,
+                selectedDayPredicate: (day) => isSameDay(_selectedDay, day),
+                eventLoader: _getEventsForDay,
+                onDaySelected: (selectedDay, focusedDay) {
+                  final sameDay = isSameDay(_selectedDay, selectedDay);
+                  setState(() {
+                    _selectedDay = selectedDay;
+                    _focusedDay = selectedDay;
+                  });
+                  if (sameDay) {
+                    _addEventDialog(selectedDay);
+                  }
+                },
+                calendarStyle: CalendarStyle(
+                  defaultTextStyle: TextStyle(color: textColor),
+                  weekendTextStyle: TextStyle(color: textColor),
+                  outsideTextStyle: TextStyle(
+                    color: textColor.withOpacity(0.5),
                   ),
-                  trailing: IconButton(
-                    icon: Icon(Icons.delete, color: Colors.red),
-                    onPressed: () => _deleteEvent(event),
+                  todayDecoration: BoxDecoration(
+                    color: Colors.orange,
+                    shape: BoxShape.circle,
                   ),
-                );
-              },
-            ),
+                  selectedDecoration: BoxDecoration(
+                    color: Colors.blueAccent,
+                    shape: BoxShape.circle,
+                  ),
+                  markersMaxCount: 1, // ¡Aquí está el cambio clave!
+                  markerDecoration: BoxDecoration(
+                    color: const Color.fromARGB(
+                      255,
+                      0,
+                      40,
+                      75,
+                    ), // Color del punto
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      // ¡Efecto de glow!
+                      BoxShadow(
+                        color: const Color.fromARGB(
+                          255,
+                          0,
+                          40,
+                          75,
+                        ), // Color del brillo
+                        blurRadius: 3.0, // Intensidad del difuminado
+                        spreadRadius: 1.0, // Expansión del efecto
+                      ),
+                    ],
+                  ),
+                  markerMargin: EdgeInsets.only(bottom: 4),
+                ),
+                headerStyle: HeaderStyle(
+                  formatButtonVisible: false,
+                  titleCentered: true,
+                  titleTextStyle: TextStyle(color: textColor),
+                  leftChevronIcon: Icon(Icons.chevron_left, color: textColor),
+                  rightChevronIcon: Icon(Icons.chevron_right, color: textColor),
+                ),
+                daysOfWeekStyle: DaysOfWeekStyle(
+                  weekdayStyle: TextStyle(color: textColor),
+                  weekendStyle: TextStyle(color: textColor),
+                ),
+              ),
+
+              Expanded(
+                child: ListView.builder(
+                  itemCount:
+                      _events[DateTime.utc(
+                            _selectedDay.year,
+                            _selectedDay.month,
+                            _selectedDay.day,
+                          )]
+                          ?.length ??
+                      0,
+                  itemBuilder: (context, index) {
+                    final event =
+                        _events[DateTime.utc(
+                          _selectedDay.year,
+                          _selectedDay.month,
+                          _selectedDay.day,
+                        )]![index];
+                    return ListTile(
+                      title: Text(event.title),
+                      subtitle: Text(
+                        '${event.description} • ${event.time.format(context)}',
+                      ),
+                      trailing: IconButton(
+                        icon: Icon(Icons.delete, color: Colors.red),
+                        onPressed: () => _deleteEvent(event),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
           ),
-        ],
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () => _addEventDialog(_selectedDay),
-        child: Icon(Icons.add),
-      ),
+          floatingActionButton: FloatingActionButton(
+            onPressed: () => _addEventDialog(_selectedDay),
+            child: Icon(Icons.add),
+          ),
+        );
+      },
     );
   }
 
-  bool isSameMonth(DateTime a, DateTime b) {
-    return a.year == b.year && a.month == b.month;
+  bool isSameDay(DateTime a, DateTime b) {
+    return a.year == b.year && a.month == b.month && a.day == b.day;
   }
 }

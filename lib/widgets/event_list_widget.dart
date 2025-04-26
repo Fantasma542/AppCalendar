@@ -6,10 +6,10 @@ class EventListWidget extends StatelessWidget {
   final Function(Event) onDeleteEvent;
 
   const EventListWidget({
-    Key? key,
+    super.key,
     required this.events,
     required this.onDeleteEvent,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {

@@ -5,7 +5,11 @@ class Event {
   final String description;
   final TimeOfDay time;
 
-  Event({required this.title, required this.description, required this.time});
+  Event({
+    required this.title,
+    this.description = '', // Valor predeterminado para description
+    required this.time,
+  });
 
   // Método para convertir un evento a un mapa (usado para almacenar en SharedPreferences)
   Map<String, dynamic> toMap() {
@@ -20,7 +24,8 @@ class Event {
   static Event fromMap(Map<String, dynamic> map) {
     return Event(
       title: map['title'] ?? '',
-      description: map['description'] ?? '',
+      description:
+          map['description'] ?? '', // Aseguramos que description nunca sea null
       time: _parseTime(map['time']),
     );
   }
